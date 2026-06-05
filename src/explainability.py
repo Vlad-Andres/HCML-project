@@ -1,12 +1,9 @@
-# ---- Add these to the bottom of explainability_extensions.py ----
-# (after renaming/moving it to src/explainability.py)
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
 
-# --- §11: Feature name extraction (already in explainability_extensions.py) ---
+# --- §11: Feature name extraction  ---
 # get_feature_names_from_pipeline, get_transformed_matrix, etc. are already there.
 def get_feature_names_from_pipeline(pipe):
     prep = pipe.named_steps["prep"]
