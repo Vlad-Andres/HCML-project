@@ -227,7 +227,7 @@ def run_permutation_importance(pipe, test_df, stage_name, model_name,
 
 
 def run_partial_dependence(pipe, test_df, stage_name, model_name,
-                           features_to_plot, output_dir=None):
+                           features_to_plot, centered=False, output_dir=None):
     from src.modeling import get_xy
 
     X_test, _ = get_xy(test_df)
@@ -237,14 +237,16 @@ def run_partial_dependence(pipe, test_df, stage_name, model_name,
             pipe,
             X_test,
             features_to_plot,
-            kind="average",
+            kind="both",
             n_jobs=-1,
             ax=ax,
             grid_resolution=30,
+            centered=centered,
         )
         plt.suptitle(f"Partial Dependence Plots: {model_name} ({stage_name})", fontsize=14)
         plt.tight_layout()
-        save_figure_to_output_dir(fig, f"pdp_{model_name}_{stage_name}.png", output_dir)
+        suffix = "_centered" if centered else ""
+        save_figure_to_output_dir(fig, f"ice_{model_name}_{stage_name}{suffix}.png", output_dir)
         plt.show()
     except Exception as e:
         print(f"Error generating PDP: {e}")
