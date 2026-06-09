@@ -48,7 +48,7 @@ RANDOM_STATE = 42
 MIN_GROUP_SIZE = 50
 
 KEYS = ["code_module", "code_presentation", "id_student"]
-SENSITIVE_ATTRS = ["gender", "age_band", "highest_education", "imd_band"]
+SENSITIVE_ATTRS = ["gender", "age_band", "imd_band"] # deleted highest_education after speech Jun 9
 
 REQUIRED_FILES = [
     "courses.csv",
