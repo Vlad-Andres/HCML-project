@@ -30,7 +30,7 @@ if XGBOOST_AVAILABLE:
 DROP_COLS = KEYS + ["target_unsuccessful", "stage"]
 
 
-def student_train_test_split(base, test_size=0.25):
+def student_train_test_split(base, test_size=0.25) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split by unique id_student to prevent data leakage."""
     unique_students = base.groupby("id_student", as_index=False)["target_unsuccessful"].max()
     train_students, test_students = train_test_split(
@@ -42,19 +42,19 @@ def student_train_test_split(base, test_size=0.25):
     return train_students, test_students
 
 
-def apply_split(df, train_students, test_students):
+def apply_split(df, train_students, test_students) -> tuple[pd.DataFrame, pd.DataFrame]:
     train = df.merge(train_students, on="id_student", how="inner")
     test = df.merge(test_students, on="id_student", how="inner")
     return train, test
 
 
-def get_xy(df):
+def get_xy(df) -> tuple[pd.DataFrame, pd.Series]:
     y = df["target_unsuccessful"].astype(int)
     X = df.drop(columns=DROP_COLS, errors="ignore")
     return X, y
 
 
-def make_preprocessor(X):
+def make_preprocessor(X) -> tuple[ColumnTransformer, list[str], list[str]]:
     categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
     numeric_cols = [c for c in X.columns if c not in categorical_cols]
 
@@ -79,7 +79,7 @@ def make_preprocessor(X):
     return preprocessor, numeric_cols, categorical_cols
 
 
-def build_models(X_train):
+def build_models(X_train) -> dict[str, Pipeline]:
     models = {
         "LogisticRegression": LogisticRegression(
             max_iter=1000,
@@ -105,7 +105,7 @@ def build_models(X_train):
             tree_method = "auto"
             device = "cpu"
 
-        models["XGBoost"] = XGBClassifier(
+        models["XGBoost"] = XGBClassifier( # type: ignore
             n_estimators=250,
             max_depth=4,
             learning_rate=0.05,
@@ -124,7 +124,7 @@ def build_models(X_train):
     return pipelines
 
 
-def evaluate_predictions(y_true, y_pred, y_prob=None):
+def evaluate_predictions(y_true, y_pred, y_prob=None) -> dict[str, float | np.ndarray | str]:
     out = {
         "accuracy":            accuracy_score(y_true, y_pred),
         "balanced_accuracy":   balanced_accuracy_score(y_true, y_pred),
@@ -142,7 +142,7 @@ def evaluate_predictions(y_true, y_pred, y_prob=None):
     return out
 
 
-def fit_and_evaluate_stage(stage_name, train_df, test_df):
+def fit_and_evaluate_stage(stage_name, train_df, test_df) -> tuple[pd.DataFrame, dict[str, Pipeline]]:
     X_train, y_train = get_xy(train_df)
     X_test, y_test = get_xy(test_df)
 

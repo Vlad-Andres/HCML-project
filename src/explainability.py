@@ -3,13 +3,34 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 from pathlib import Path
+import itertools
+from src.modeling import get_xy
+from src.config import (
+    RANDOM_STATE,
+    SHAP_SAMPLE_SIZE_TREE,
+    SHAP_SAMPLE_SIZE_SUBGROUP,
+    SHAP_TOP_N_FEATURES,
+    SHAP_SUMMARY_MAX_DISPLAY,
+    PERMUTATION_N_REPEATS,
+    PFI_TOP_N,
+    PLOT_DPI,
+    PLOT_DPI_TEMP,
+    HISTOGRAM_BINS,
+    HISTOGRAM_ALPHA,
+)
+import shap as shap_lib
 
-
-def save_figure_to_output_dir(fig, filename, output_dir):
+def save_figure_to_output_dir(fig, filename, output_dir, dpi=None):
     if output_dir is not None:
         path = Path(output_dir) / filename
-        fig.savefig(path, dpi=200, bbox_inches="tight")
+        fig.savefig(path, dpi=dpi or PLOT_DPI, bbox_inches="tight")
         print("Saved:", path)
+
+
+def _sample_data(X, sample_size, random_state=RANDOM_STATE):
+    if len(X) > sample_size:
+        return X.sample(n=sample_size, random_state=random_state)
+    return X
 
 
 # --- §11: Feature name extraction  ---
@@ -53,48 +74,35 @@ def model_feature_importance(pipe, top_n=25):
 
 # --- §12: SHAP for tree models ---
 
-def run_shap_for_tree_model(pipe, test_df, stage_name, model_name,
-                            sample_size=800, output_dir=None, shap_available=True):
+def run_shap_for_tree_model(
+        pipe,
+        test_df, 
+        stage_name, 
+        model_name,
+        sample_size=None, 
+        output_dir=None, 
+        shap_available=True
+):
     if not shap_available:
         print("SHAP is not available.")
         return None
-
-    try:
-        import shap as shap_lib
-    except ImportError:
-        print("SHAP is not available.")
-        return None
-
-    from src.modeling import get_xy
 
     model = pipe.named_steps["model"]
     if not hasattr(model, "feature_importances_"):
         print(f"Skipping SHAP for {model_name}: model is not tree-based.")
         return None
 
-    X_test, y_test = get_xy(test_df)
+    if sample_size is None:
+        sample_size = SHAP_SAMPLE_SIZE_TREE
 
-    if len(X_test) > sample_size:
-        X_sample = X_test.sample(n=sample_size, random_state=42)
-    else:
-        X_sample = X_test
+    X_test, _ = get_xy(test_df)
+    X_sample = _sample_data(X_test, sample_size, RANDOM_STATE)
 
+    shap_vals, feature_names = _compute_shap_values_for_pipe(pipe, X_sample)
     prep = pipe.named_steps["prep"]
     X_trans = prep.transform(X_sample)
     if hasattr(X_trans, "toarray"):
         X_trans = X_trans.toarray()
-
-    feature_names = get_feature_names_from_pipeline(pipe)
-
-    explainer = shap_lib.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_trans)
-
-    if isinstance(shap_values, list):
-        shap_vals = shap_values[1] if len(shap_values) > 1 else shap_values[0]
-    else:
-        shap_vals = shap_values
-        if getattr(shap_vals, "ndim", 0) == 3:
-            shap_vals = shap_vals[:, :, 1] if shap_vals.shape[2] > 1 else shap_vals[:, :, 0]
 
     mean_abs_shap = np.abs(shap_vals).mean(axis=0)
     n_features = min(len(feature_names), len(mean_abs_shap))
@@ -103,8 +111,7 @@ def run_shap_for_tree_model(pipe, test_df, stage_name, model_name,
         "mean_abs_shap": mean_abs_shap[:n_features],
     }).sort_values("mean_abs_shap", ascending=False).reset_index(drop=True)
 
-    top_n = 20
-    top = importance_df.head(top_n).sort_values("mean_abs_shap", ascending=True)
+    top = importance_df.head(SHAP_TOP_N_FEATURES).sort_values("mean_abs_shap", ascending=True)
     plt.figure(figsize=(8, 6))
     plt.barh(top["feature"], top["mean_abs_shap"])
     plt.xlabel("Mean |SHAP value|")
@@ -119,42 +126,43 @@ def run_shap_for_tree_model(pipe, test_df, stage_name, model_name,
             X_trans,
             feature_names=feature_names,
             show=False,
-            max_display=25,
+            max_display=SHAP_SUMMARY_MAX_DISPLAY,
         )
         plt.title(f"SHAP summary: {stage_name}, {model_name}")
         plt.tight_layout()
         save_figure_to_output_dir(plt.gcf(), f"shap_summary_{model_name}_{stage_name}.png", output_dir)
         plt.show()
     except Exception as e:
-        print("Could not create SHAP summary plot:", e)
+        print(f"Could not create SHAP summary plot: {e}")
 
     return importance_df
 
 
-def subgroup_shap_comparison(pipe, test_df, sensitive_attr,
-                             stage_name, model_name, sample_size=1000,
-                             shap_available=True, output_dir=None):
+def subgroup_shap_comparison(
+        pipe,
+        test_df,
+        sensitive_attr,
+        stage_name, 
+        model_name, 
+        sample_size=None,
+        shap_available=True, 
+        output_dir=None
+):
     if not shap_available:
         print("SHAP is not available.")
         return None
-
-    try:
-        import shap as shap_lib
-    except ImportError:
-        print("SHAP is not available.")
-        return None
-
-    from src.modeling import get_xy
 
     model = pipe.named_steps["model"]
     if not hasattr(model, "feature_importances_"):
         print(f"Skipping subgroup SHAP for {model_name}: model is not tree-based.")
         return None
 
+    if sample_size is None:
+        sample_size = SHAP_SAMPLE_SIZE_SUBGROUP
+
     X_test_raw, _ = get_xy(test_df)
-    n = min(sample_size, len(X_test_raw))
-    sample_idx = test_df.sample(n=n, random_state=42).index
-    X_sample_raw = X_test_raw.loc[sample_idx]
+    X_sample_raw = _sample_data(X_test_raw, sample_size, RANDOM_STATE)
+    sample_idx = X_sample_raw.index
     sensitive_values = test_df.loc[sample_idx, sensitive_attr]
 
     prep = pipe.named_steps["prep"]
@@ -169,8 +177,6 @@ def subgroup_shap_comparison(pipe, test_df, sensitive_attr,
     explainer = shap_lib.TreeExplainer(model)
     shap_values = explainer.shap_values(X_sample_trans_dense)
     shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
-    if getattr(shap_positive, "ndim", 0) == 3:
-        shap_positive = shap_positive[:, :, 1]
 
     shap_abs_df = pd.DataFrame(np.abs(shap_positive), columns=feature_names)
     shap_abs_df[sensitive_attr] = sensitive_values.values
@@ -193,9 +199,16 @@ def subgroup_shap_comparison(pipe, test_df, sensitive_attr,
     return grouped_shap
 
 
-def run_permutation_importance(pipe, test_df, stage_name, model_name,
-                               output_dir=None, n_repeats=5):
-    from src.modeling import get_xy
+def run_permutation_importance(
+        pipe,
+        test_df, 
+        stage_name, 
+        model_name,
+        output_dir=None, 
+        n_repeats=None
+):
+    if n_repeats is None:
+        n_repeats = PERMUTATION_N_REPEATS
 
     X_test, y_test = get_xy(test_df)
     result = permutation_importance(
@@ -203,7 +216,7 @@ def run_permutation_importance(pipe, test_df, stage_name, model_name,
         X_test,
         y_test,
         n_repeats=n_repeats,
-        random_state=42,
+        random_state=RANDOM_STATE,
         n_jobs=-1,
         scoring="balanced_accuracy",
     )
@@ -214,11 +227,11 @@ def run_permutation_importance(pipe, test_df, stage_name, model_name,
         "importance_std": result.importances_std,
     }).sort_values("importance_mean", ascending=False)
 
-    top_pfi = pfi_df.head(15)
+    top_pfi = pfi_df.head(PFI_TOP_N)
     plt.figure(figsize=(10, 6))
     plt.barh(top_pfi["feature"][::-1], top_pfi["importance_mean"][::-1])
     plt.xlabel("Mean decrease in balanced accuracy")
-    plt.title(f"Permutation Feature Importance (PFI) - Top 15\n{model_name} | Stage: {stage_name}")
+    plt.title(f"Permutation Feature Importance (PFI) - Top {PFI_TOP_N}\n{model_name} | Stage: {stage_name}")
     plt.tight_layout()
     save_figure_to_output_dir(plt.gcf(), f"pfi_{model_name}_{stage_name}.png", output_dir)
     plt.show()
@@ -226,9 +239,15 @@ def run_permutation_importance(pipe, test_df, stage_name, model_name,
     return pfi_df
 
 
-def run_partial_dependence(pipe, test_df, stage_name, model_name,
-                           features_to_plot, centered=False, output_dir=None):
-    from src.modeling import get_xy
+def run_partial_dependence(
+        pipe, 
+        test_df, 
+        stage_name, 
+        model_name,
+        features_to_plot, 
+        centered=False, 
+        output_dir=None
+):
 
     X_test, _ = get_xy(test_df)
     try:
@@ -299,6 +318,7 @@ def compute_family_importance(shap_results):
 
 
 def plot_family_importance(family_importance, output_dir=None):
+
     for (model_name, stage_name), g in family_importance.groupby(["model", "stage"]):
         g_sorted = g.sort_values("mean_abs_shap", ascending=True)
         plt.figure(figsize=(7, 4))
@@ -307,4 +327,78 @@ def plot_family_importance(family_importance, output_dir=None):
         plt.title(f"Feature family importance\n{model_name} – {stage_name}")
         plt.tight_layout()
         save_figure_to_output_dir(plt.gcf(), f"family_importance_{model_name}_{stage_name}.png", output_dir)
+        plt.show()
+
+
+def _compute_shap_values_for_pipe(pipe, X_sample):
+    """
+    Helper to compute SHAP values for a logistic reg. in a pipeline.
+    Return numpy array and feature_names array.
+    """
+    model = pipe.named_steps["model"]
+    prep = pipe.named_steps["prep"]
+    
+    X_trans = prep.transform(X_sample)
+    if hasattr(X_trans, "toarray"):
+        X_trans = X_trans.toarray()
+    
+    explainer = shap_lib.TreeExplainer(model)
+    shap_vals = explainer.shap_values(X_trans)
+    
+    if isinstance(shap_vals, list):
+        shap_vals = shap_vals[1]
+    
+    feature_names = get_feature_names_from_pipeline(pipe)
+    return shap_vals, feature_names
+
+
+def plot_shap_distributions(models_dict, test_df, sample_size=None, output_dir=None):
+    """
+    For each model pair and feature, plot side-by-side distributions of SHAP values.
+    Shows immediately where model A overlays low/high SHAP on model B.
+    """
+    if sample_size is None:
+        sample_size = SHAP_SAMPLE_SIZE_TREE
+
+    X_test, _ = get_xy(test_df)
+    X_sample = _sample_data(X_test, sample_size, RANDOM_STATE)
+    
+    shap_data = {}
+    for model_name, pipe in models_dict.items():
+        model = pipe.named_steps["model"]
+        if not hasattr(model, "feature_importances_"):
+            continue
+        
+        shap_vals, feature_names = _compute_shap_values_for_pipe(pipe, X_sample)
+        shap_data[model_name] = (shap_vals, feature_names)
+    
+    # Plot pairwise comparisons
+    for model_a, model_b in itertools.combinations(shap_data.keys(), 2):
+        shap_vals_a, feature_names_a = shap_data[model_a]
+        shap_vals_b, _ = shap_data[model_b]
+        
+        # Get top 6 features by importance (mean absolute SHAP from model_a)
+        mean_abs = np.abs(shap_vals_a).mean(axis=0)
+        top_indices = np.argsort(mean_abs)[-6:][::-1]
+        
+        # 2 plots per row: 6 features = 3 rows, 2 cols
+        fig, axes = plt.subplots(6, 1, figsize=(12, 12))
+        axes = axes.flatten()
+        
+        for idx, feat_idx in enumerate(top_indices):
+            ax = axes[idx]
+            vals_a = shap_vals_a[:, feat_idx]
+            vals_b = shap_vals_b[:, feat_idx]
+            
+            ax.hist(vals_a, alpha=HISTOGRAM_ALPHA, label=model_a, bins=HISTOGRAM_BINS, edgecolor='black')
+            ax.hist(vals_b, alpha=HISTOGRAM_ALPHA, label=model_b, bins=HISTOGRAM_BINS, edgecolor='black')
+            ax.set_xlabel("SHAP value")
+            ax.set_ylabel("Frequency (# samples)")
+            ax.set_title(f"{feature_names_a[feat_idx]}")
+            ax.legend()
+        
+        plt.suptitle(f"SHAP Distribution: {model_a} vs {model_b}", fontsize=14)
+        plt.tight_layout()
+        if output_dir:
+            plt.savefig(f"{output_dir}/shap_compare_{model_a}_vs_{model_b}.png", dpi=PLOT_DPI_TEMP)
         plt.show()

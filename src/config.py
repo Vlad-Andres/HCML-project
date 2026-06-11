@@ -48,6 +48,18 @@ RANDOM_STATE = 42
 MIN_GROUP_SIZE = 50
 
 KEYS = ["code_module", "code_presentation", "id_student"]
+
+# Visualization and explainability constants
+SHAP_SAMPLE_SIZE_TREE = 800
+SHAP_SAMPLE_SIZE_SUBGROUP = 1000
+SHAP_TOP_N_FEATURES = 20
+SHAP_SUMMARY_MAX_DISPLAY = 25
+PERMUTATION_N_REPEATS = 5
+PFI_TOP_N = 15
+PLOT_DPI = 200
+PLOT_DPI_TEMP = 150
+HISTOGRAM_BINS = 30
+HISTOGRAM_ALPHA = 0.6
 SENSITIVE_ATTRS = ["gender", "age_band", "imd_band"] # deleted highest_education after speech Jun 9
 
 REQUIRED_FILES = [
