@@ -20,6 +20,21 @@ from src.config import (
 )
 import shap as shap_lib
 
+def _positive_class_shap_values(shap_vals):
+    if hasattr(shap_vals, "values"):
+        shap_vals = shap_vals.values
+    if isinstance(shap_vals, list):
+        shap_vals = shap_vals[1]
+    shap_vals = np.asarray(shap_vals)
+    if shap_vals.ndim == 3:
+        class_axes = [axis for axis, size in enumerate(shap_vals.shape) if size == 2]
+        if not class_axes:
+            raise ValueError(f"Expected one binary-output axis of size 2, got shape={shap_vals.shape}")
+        shap_vals = np.take(shap_vals, indices=1, axis=class_axes[-1])
+    if shap_vals.ndim != 2:
+        raise ValueError(f"Expected 2D SHAP values, got shape={shap_vals.shape}")
+    return shap_vals
+
 def save_figure_to_output_dir(fig, filename, output_dir, dpi=None):
     if output_dir is not None:
         path = Path(output_dir) / filename
@@ -79,21 +94,13 @@ def run_shap_for_tree_model(
         test_df, 
         stage_name, 
         model_name,
-        sample_size=None, 
+        sample_size= SHAP_SAMPLE_SIZE_TREE, 
         output_dir=None, 
-        shap_available=True
 ):
-    if not shap_available:
-        print("SHAP is not available.")
-        return None
-
     model = pipe.named_steps["model"]
     if not hasattr(model, "feature_importances_"):
         print(f"Skipping SHAP for {model_name}: model is not tree-based.")
         return None
-
-    if sample_size is None:
-        sample_size = SHAP_SAMPLE_SIZE_TREE
 
     X_test, _ = get_xy(test_df)
     X_sample = _sample_data(X_test, sample_size, RANDOM_STATE)
@@ -106,6 +113,8 @@ def run_shap_for_tree_model(
 
     mean_abs_shap = np.abs(shap_vals).mean(axis=0)
     n_features = min(len(feature_names), len(mean_abs_shap))
+    # mean_abs_shap = [float(sub_list[0]) for sub_list in mean_abs_shap]
+    mean_abs_shap = np.asarray(mean_abs_shap).flatten()
     importance_df = pd.DataFrame({
         "feature": feature_names[:n_features],
         "mean_abs_shap": mean_abs_shap[:n_features],
@@ -115,7 +124,7 @@ def run_shap_for_tree_model(
     plt.figure(figsize=(8, 6))
     plt.barh(top["feature"], top["mean_abs_shap"])
     plt.xlabel("Mean |SHAP value|")
-    plt.title(f"SHAP feature importance\n{model_name} – {stage_name}")
+    plt.title(f"SHAP feature importance\n{model_name} - {stage_name}")
     plt.tight_layout()
     save_figure_to_output_dir(plt.gcf(), f"shap_{model_name}_{stage_name}.png", output_dir)
     plt.show()
@@ -144,14 +153,9 @@ def subgroup_shap_comparison(
         sensitive_attr,
         stage_name, 
         model_name, 
-        sample_size=None,
-        shap_available=True, 
+        sample_size=SHAP_SAMPLE_SIZE_SUBGROUP,
         output_dir=None
 ):
-    if not shap_available:
-        print("SHAP is not available.")
-        return None
-
     model = pipe.named_steps["model"]
     if not hasattr(model, "feature_importances_"):
         print(f"Skipping subgroup SHAP for {model_name}: model is not tree-based.")
@@ -176,7 +180,7 @@ def subgroup_shap_comparison(
 
     explainer = shap_lib.TreeExplainer(model)
     shap_values = explainer.shap_values(X_sample_trans_dense)
-    shap_positive = shap_values[1] if isinstance(shap_values, list) else shap_values
+    shap_positive = _positive_class_shap_values(shap_values)
 
     shap_abs_df = pd.DataFrame(np.abs(shap_positive), columns=feature_names)
     shap_abs_df[sensitive_attr] = sensitive_values.values
@@ -324,7 +328,7 @@ def plot_family_importance(family_importance, output_dir=None):
         plt.figure(figsize=(7, 4))
         plt.barh(g_sorted["family"], g_sorted["mean_abs_shap"])
         plt.xlabel("Total mean |SHAP value|")
-        plt.title(f"Feature family importance\n{model_name} – {stage_name}")
+        plt.title(f"Feature family importance\n{model_name} - {stage_name}")
         plt.tight_layout()
         save_figure_to_output_dir(plt.gcf(), f"family_importance_{model_name}_{stage_name}.png", output_dir)
         plt.show()
@@ -343,10 +347,7 @@ def _compute_shap_values_for_pipe(pipe, X_sample):
         X_trans = X_trans.toarray()
     
     explainer = shap_lib.TreeExplainer(model)
-    shap_vals = explainer.shap_values(X_trans)
-    
-    if isinstance(shap_vals, list):
-        shap_vals = shap_vals[1]
+    shap_vals = _positive_class_shap_values(explainer.shap_values(X_trans))
     
     feature_names = get_feature_names_from_pipeline(pipe)
     return shap_vals, feature_names

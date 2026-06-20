@@ -22,10 +22,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from src.config import KEYS, RANDOM_STATE, XGBOOST_AVAILABLE
+from src.config import KEYS, RANDOM_STATE
 
-if XGBOOST_AVAILABLE:
-    from xgboost import XGBClassifier
+from xgboost import XGBClassifier
 
 DROP_COLS = KEYS + ["target_unsuccessful", "stage"]
 
@@ -95,27 +94,26 @@ def build_models(X_train) -> dict[str, Pipeline]:
         ),
     }
 
-    if XGBOOST_AVAILABLE:
-        try:
-            subprocess.check_output("nvidia-smi")
-            tree_method = "hist"
-            device = "cuda"
-            print("GPU detected! XGBoost will use GPU acceleration.")
-        except Exception:
-            tree_method = "auto"
-            device = "cpu"
+    try:
+        subprocess.check_output("nvidia-smi")
+        tree_method = "hist"
+        device = "cuda"
+        print("GPU detected! XGBoost will use GPU acceleration.")
+    except Exception:
+        tree_method = "auto"
+        device = "cpu"
 
-        models["XGBoost"] = XGBClassifier( # type: ignore
-            n_estimators=250,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            eval_metric="logloss",
-            random_state=RANDOM_STATE,
-            tree_method=tree_method,
-            device=device,
-        )
+    models["XGBoost"] = XGBClassifier( # type: ignore
+        n_estimators=250,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        eval_metric="logloss",
+        random_state=RANDOM_STATE,
+        tree_method=tree_method,
+        device=device,
+    )
 
     pipelines = {
         name: Pipeline(steps=[("prep", make_preprocessor(X_train)[0]), ("model", model)])

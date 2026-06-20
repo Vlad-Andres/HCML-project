@@ -28,18 +28,6 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 
-try:
-    from xgboost import XGBClassifier
-    XGBOOST_AVAILABLE = True
-except Exception:
-    XGBOOST_AVAILABLE = False
-
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except Exception:
-    SHAP_AVAILABLE = False
-
 warnings.filterwarnings("ignore")
 pd.set_option("display.max_columns", 200)
 pd.set_option("display.max_rows", 100)
