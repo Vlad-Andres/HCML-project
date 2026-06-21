@@ -8,6 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def save_current_plot(output_dir, filename, rect=None):
+    path = Path(output_dir) / filename
+    plt.tight_layout(rect=rect)
+    plt.savefig(path, dpi=200, bbox_inches="tight")
+    plt.show()
+    print("Saved:", path)
+
+
 def save_bar_plot(df, x, y, hue, title, output_dir, filename, rotation=45):
     plt.figure(figsize=(10, 5))
     groups = df[hue].unique().tolist()
@@ -24,12 +32,8 @@ def save_bar_plot(df, x, y, hue, title, output_dir, filename, rotation=45):
                rotation=rotation, ha="right")
     plt.ylabel(y)
     plt.title(title)
-    plt.legend(title=hue, bbox_to_anchor=(1.05, 1), loc="upper left")
-    plt.tight_layout()
-    path = Path(output_dir) / filename
-    plt.savefig(path, dpi=200, bbox_inches="tight")
-    plt.show()
-    print("Saved:", path)
+    plt.legend(title=hue, loc="upper right", frameon=True)
+    save_current_plot(output_dir, filename)
 
 
 def plot_overall_performance(performance_table, output_dir):
@@ -43,9 +47,7 @@ def plot_overall_performance(performance_table, output_dir):
     plt.ylabel("Balanced accuracy")
     plt.xlabel("Stage")
     plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_dir / "overall_balanced_accuracy_by_stage.png", dpi=200)
-    plt.show()
+    save_current_plot(output_dir, "overall_balanced_accuracy_by_stage.png")
 
 
 def plot_fairness_gaps(fairness_gaps, output_dir):
@@ -69,3 +71,69 @@ def plot_fairness_gaps(fairness_gaps, output_dir):
             output_dir=output_dir,
             filename=f"selection_rate_gap_{model_name}.png",
         )
+
+
+def plot_combined_fairness_metric(
+    fairness_gaps,
+    metric_col,
+    title,
+    ylabel,
+    filename,
+    output_dir,
+):
+    stage_order = ["early_25pct", "full_100pct"]
+    stages_present = [stage for stage in stage_order if stage in fairness_gaps["stage"].unique()]
+    if not stages_present:
+        return
+
+    fig, axes = plt.subplots(1, len(stages_present), figsize=(5.2 * len(stages_present), 4.6), sharey=True)
+    if len(stages_present) == 1:
+        axes = [axes]
+
+    model_order = fairness_gaps["model"].drop_duplicates().tolist()
+    attr_order = fairness_gaps["sensitive_attr"].drop_duplicates().tolist()
+
+    for ax, stage_name in zip(axes, stages_present):
+        stage_df = fairness_gaps[fairness_gaps["stage"] == stage_name].copy()
+        width = 0.8 / max(len(model_order), 1)
+        positions = np.arange(len(attr_order))
+
+        for idx, model_name in enumerate(model_order):
+            model_df = stage_df[stage_df["model"] == model_name].set_index("sensitive_attr").reindex(attr_order)
+            ax.bar(
+                positions + idx * width,
+                model_df[metric_col].values,
+                width=width,
+                label=model_name,
+            )
+
+        ax.set_xticks(positions + width * (len(model_order) - 1) / 2)
+        ax.set_xticklabels(attr_order, rotation=45, ha="right")
+        ax.set_xlabel("Sensitive attribute")
+        ax.set_title(stage_name)
+        ax.grid(axis="y", alpha=0.25)
+
+    axes[0].set_ylabel(ylabel)
+    for ax in axes:
+        ax.legend(title="model", loc="upper right", frameon=True)
+    fig.suptitle(title)
+    save_current_plot(output_dir, filename, rect=[0, 0, 1, 0.95])
+
+
+def plot_combined_fairness_gaps(fairness_gaps, output_dir):
+    plot_combined_fairness_metric(
+        fairness_gaps=fairness_gaps,
+        metric_col="fnr_gap",
+        title="False negative rate gap by sensitive attribute: all models",
+        ylabel="fnr_gap",
+        filename="fnr_gap_all_models.png",
+        output_dir=output_dir,
+    )
+    plot_combined_fairness_metric(
+        fairness_gaps=fairness_gaps,
+        metric_col="selection_rate_pred_at_risk_gap",
+        title="Predicted at-risk selection rate gap: all models",
+        ylabel="selection_rate_pred_at_risk_gap",
+        filename="selection_rate_gap_all_models.png",
+        output_dir=output_dir,
+    )
