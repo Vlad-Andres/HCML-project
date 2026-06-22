@@ -1,4 +1,9 @@
 family,mean_abs_shap,model,stage
+Assessment,4.3238447965394755,LogisticRegression,early_25pct
+Demographic,0.752381117854265,LogisticRegression,early_25pct
+Region,0.2282347507124845,LogisticRegression,early_25pct
+Registration / other,0.4533988922759511,LogisticRegression,early_25pct
+VLE engagement,1.8510481517727975,LogisticRegression,early_25pct
 Assessment,0.2622451728216246,RandomForest,early_25pct
 Demographic,0.03131173924366098,RandomForest,early_25pct
 Region,0.003715774179941352,RandomForest,early_25pct
@@ -9,6 +14,11 @@ Demographic,0.355834424495697,XGBoost,early_25pct
 Region,0.07913237065076828,XGBoost,early_25pct
 Registration / other,0.33896321058273315,XGBoost,early_25pct
 VLE engagement,1.05472731590271,XGBoost,early_25pct
+Assessment,8.680307248701272,LogisticRegression,full_100pct
+Demographic,0.7856634475565037,LogisticRegression,full_100pct
+Region,0.2391466586231582,LogisticRegression,full_100pct
+Registration / other,0.7628326273498185,LogisticRegression,full_100pct
+VLE engagement,3.1500685904104913,LogisticRegression,full_100pct
 Assessment,0.37262378652360023,RandomForest,full_100pct
 Demographic,0.009846291764182644,RandomForest,full_100pct
 Region,0.0016221515167788394,RandomForest,full_100pct

@@ -20,6 +20,15 @@ from src.config import (
 )
 import shap as shap_lib
 
+# Save globally shap values to avoid calculating them every time
+_SAMPLE_CACHE = {}
+_SHAP_CACHE = {}
+
+def clear_shap_cache():
+    _SAMPLE_CACHE.clear()
+    _SHAP_CACHE.clear()
+
+
 def _positive_class_shap_values(shap_vals):
     if hasattr(shap_vals, "values"):
         shap_vals = shap_vals.values
@@ -43,9 +52,18 @@ def save_figure_to_output_dir(fig, filename, output_dir, dpi=None):
 
 
 def _sample_data(X, sample_size, random_state=RANDOM_STATE):
+    cache_key = (id(X), sample_size, random_state)
+    if cache_key in _SAMPLE_CACHE:
+        return _SAMPLE_CACHE[cache_key]
+
     if len(X) > sample_size:
-        return X.sample(n=sample_size, random_state=random_state)
-    return X
+        sampled = X.sample(n=sample_size, random_state=random_state)
+    else:
+        sampled = X
+
+    _SAMPLE_CACHE[cache_key] = sampled
+    return sampled
+
 
 
 # --- §11: Feature name extraction  ---
@@ -98,9 +116,9 @@ def run_shap_for_tree_model(
         output_dir=None, 
 ):
     model = pipe.named_steps["model"]
-    if not hasattr(model, "feature_importances_"):
-        print(f"Skipping SHAP for {model_name}: model is not tree-based.")
-        return None
+    # if not hasattr(model, "feature_importances_"):
+    #     print(f"Skipping SHAP for {model_name}: model is not tree-based.")
+    #     return None
 
     X_test, _ = get_xy(test_df)
     X_sample = _sample_data(X_test, sample_size, RANDOM_STATE)
@@ -157,9 +175,9 @@ def subgroup_shap_comparison(
         output_dir=None
 ):
     model = pipe.named_steps["model"]
-    if not hasattr(model, "feature_importances_"):
-        print(f"Skipping subgroup SHAP for {model_name}: model is not tree-based.")
-        return None
+    # if not hasattr(model, "feature_importances_"):
+    #     print(f"Skipping subgroup SHAP for {model_name}: model is not tree-based.")
+        # return None
 
     if sample_size is None:
         sample_size = SHAP_SAMPLE_SIZE_SUBGROUP
@@ -169,18 +187,7 @@ def subgroup_shap_comparison(
     sample_idx = X_sample_raw.index
     sensitive_values = test_df.loc[sample_idx, sensitive_attr]
 
-    prep = pipe.named_steps["prep"]
-    X_sample_trans = prep.transform(X_sample_raw)
-    feature_names = get_feature_names_from_pipeline(pipe)
-
-    if hasattr(X_sample_trans, "toarray"):
-        X_sample_trans_dense = X_sample_trans.toarray()
-    else:
-        X_sample_trans_dense = X_sample_trans
-
-    explainer = shap_lib.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_sample_trans_dense)
-    shap_positive = _positive_class_shap_values(shap_values)
+    shap_positive, feature_names = _compute_shap_values_for_pipe(pipe, X_sample_raw)
 
     shap_abs_df = pd.DataFrame(np.abs(shap_positive), columns=feature_names)
     shap_abs_df[sensitive_attr] = sensitive_values.values
@@ -337,8 +344,12 @@ def plot_family_importance(family_importance, output_dir=None):
 def _compute_shap_values_for_pipe(pipe, X_sample):
     """
     Helper to compute SHAP values for a logistic reg. in a pipeline.
-    Return numpy array and feature_names array.
+    Return numpy array and feature_names array. Cached globally.
     """
+    cache_key = (id(pipe), id(X_sample))
+    if cache_key in _SHAP_CACHE:
+        return _SHAP_CACHE[cache_key]
+
     model = pipe.named_steps["model"]
     prep = pipe.named_steps["prep"]
     
@@ -346,11 +357,18 @@ def _compute_shap_values_for_pipe(pipe, X_sample):
     if hasattr(X_trans, "toarray"):
         X_trans = X_trans.toarray()
     
-    explainer = shap_lib.TreeExplainer(model)
-    shap_vals = _positive_class_shap_values(explainer.shap_values(X_trans))
-    
     feature_names = get_feature_names_from_pipeline(pipe)
-    return shap_vals, feature_names
+    
+    # For linear model
+    if hasattr(model, "coef_"):
+        explainer = shap_lib.LinearExplainer(model, X_trans)
+        res = (explainer.shap_values(X_trans), feature_names)
+    else:
+        explainer = shap_lib.TreeExplainer(model)
+        res = (_positive_class_shap_values(explainer.shap_values(X_trans)), feature_names)
+        
+    _SHAP_CACHE[cache_key] = res
+    return res
 
 
 def plot_shap_distributions(models_dict, test_df, sample_size=None, output_dir=None):
@@ -367,8 +385,8 @@ def plot_shap_distributions(models_dict, test_df, sample_size=None, output_dir=N
     shap_data = {}
     for model_name, pipe in models_dict.items():
         model = pipe.named_steps["model"]
-        if not hasattr(model, "feature_importances_"):
-            continue
+        # if not hasattr(model, "feature_importances_"):
+        #     continue
         
         shap_vals, feature_names = _compute_shap_values_for_pipe(pipe, X_sample)
         shap_data[model_name] = (shap_vals, feature_names)
@@ -403,3 +421,67 @@ def plot_shap_distributions(models_dict, test_df, sample_size=None, output_dir=N
         if output_dir:
             plt.savefig(f"{output_dir}/shap_compare_{model_a}_vs_{model_b}.png", dpi=PLOT_DPI_TEMP)
         plt.show()
+
+
+def plot_combined_shap_comparison(
+    models_dict,
+    test_df,
+    stage_name,
+    sample_size=None,
+    top_n=15,
+    output_dir=None
+):
+    """
+    Plots feature importances for all models in models_dict on a single grouped bar chart
+    """
+    if sample_size is None:
+        sample_size = SHAP_SAMPLE_SIZE_TREE
+
+    X_test, _ = get_xy(test_df)
+    X_sample = _sample_data(X_test, sample_size, RANDOM_STATE)
+
+    model_names = list(models_dict.keys())
+    if not model_names:
+        print("No models provided in models_dict.")
+        return None
+
+    combined_importances = []
+
+    for model_name, pipe in models_dict.items():
+        shap_vals, feature_names = _compute_shap_values_for_pipe(pipe, X_sample)
+        mean_abs_shap = np.abs(shap_vals).mean(axis=0)
+        
+        df = pd.DataFrame({
+            "feature": feature_names,
+            model_name: mean_abs_shap
+        })
+        combined_importances.append(df)
+
+    # Merge all DataFrames on 'feature'
+    combined_df = combined_importances[0]
+    for df in combined_importances[1:]:
+        combined_df = pd.merge(combined_df, df, on="feature", how="outer")
+
+    combined_df = combined_df.fillna(0)
+
+    # Sort descending by the importance of the first model in the dictionary
+    sorting_model = "XGBoost"
+    combined_df = combined_df.sort_values(by=sorting_model, ascending=False).reset_index(drop=True)
+
+    # Take the top N features
+    plot_data = combined_df.head(top_n).set_index("feature")
+
+    # Plot as a grouped vertical bar chart (similar to subgroup_shap_comparison)
+    ax = plot_data.plot(kind="bar", figsize=(12, 6), width=0.8)
+    plt.title(f"Top {top_n} Feature Importance (Mean |SHAP|) Across Models\nStage: {stage_name} (Sorted by {sorting_model})")
+    plt.ylabel("Mean |SHAP Value|")
+    plt.xlabel("Features")
+    plt.xticks(rotation=45, ha="right")
+    plt.legend(title="Models")
+    plt.tight_layout()
+    
+    save_figure_to_output_dir(plt.gcf(), f"shap_combined_models_{stage_name}.png", output_dir)
+    plt.show()
+
+    return combined_df
+
