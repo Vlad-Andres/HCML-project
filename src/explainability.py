@@ -457,7 +457,7 @@ def plot_combined_shap_comparison(
         })
         combined_importances.append(df)
 
-    # Merge all DataFrames on 'feature'
+    # Merge all DataFrames on one 'feature'
     combined_df = combined_importances[0]
     for df in combined_importances[1:]:
         combined_df = pd.merge(combined_df, df, on="feature", how="outer")
@@ -468,7 +468,7 @@ def plot_combined_shap_comparison(
     sorting_model = "XGBoost"
     combined_df = combined_df.sort_values(by=sorting_model, ascending=False).reset_index(drop=True)
 
-    # Take the top N features
+    # top N features
     plot_data = combined_df.head(top_n).set_index("feature")
 
     # Plot as a grouped vertical bar chart (similar to subgroup_shap_comparison)
@@ -485,3 +485,54 @@ def plot_combined_shap_comparison(
 
     return combined_df
 
+def plot_combined_pfi_comparison(
+    models_dict,
+    test_df,
+    stage_name,
+    top_n=7,
+    output_dir=None
+):
+    """
+    Plots feature importances for all models in models_dict on a single grouped bar chart
+    """
+    
+    model_names = list(models_dict.keys())
+    if not model_names:
+        print("No models provided in models_dict.")
+        return None
+
+    combined_pfi_importances = []
+
+    X_test, y_test = get_xy(test_df)
+
+    for model_name, pipe in models_dict.items():
+        pfi_values = permutation_importance(pipe, X_test, y_test, n_repeats=PERMUTATION_N_REPEATS, random_state=RANDOM_STATE)
+        df = pd.DataFrame({
+            "feature": X_test.columns,
+            model_name: pfi_values.importances_mean
+        })
+        combined_pfi_importances.append(df)
+
+    # combine data on feature
+    combined_df = combined_pfi_importances[0]
+    for df in combined_pfi_importances[1:]:
+        combined_df = pd.merge(combined_df, df, on="feature", how="outer")
+
+    combined_df = combined_df.fillna(0)
+    
+    sorting_model = "XGBoost" if "XGBoost" in model_names else model_names[0]
+    combined_df = combined_df.sort_values(by=sorting_model, ascending=False).reset_index(drop=True)
+
+    plot_data = combined_df.head(top_n).set_index("feature").iloc[::-1]
+    # Plot as a grouped horizontal bar chart
+    ax = plot_data.plot(kind="barh", figsize=(10, 6), width=0.8)
+    plt.title(f"Top {top_n} Permutation Feature Importance (PFI) Across Models\nStage: {stage_name} (Sorted by {sorting_model})")
+    plt.xlabel("Mean Decrease in Balanced Accuracy")
+    plt.ylabel("Features")
+    plt.legend(title="Models")
+    plt.tight_layout()
+    
+    save_figure_to_output_dir(plt.gcf(), f"pfi_combined_models_{stage_name}.png", output_dir)
+    plt.show()
+
+    return combined_df
