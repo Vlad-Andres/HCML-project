@@ -489,7 +489,7 @@ def plot_combined_pfi_comparison(
     models_dict,
     test_df,
     stage_name,
-    top_n=7,
+    top_n=5,
     output_dir=None
 ):
     """
@@ -525,7 +525,7 @@ def plot_combined_pfi_comparison(
 
     plot_data = combined_df.head(top_n).set_index("feature").iloc[::-1]
     # Plot as a grouped horizontal bar chart
-    ax = plot_data.plot(kind="barh", figsize=(10, 6), width=0.8)
+    ax = plot_data.plot(kind="barh", figsize=(8, 4), width=0.8)
     plt.title(f"Top {top_n} Permutation Feature Importance (PFI) Across Models\nStage: {stage_name} (Sorted by {sorting_model})")
     plt.xlabel("Mean Decrease in Balanced Accuracy")
     plt.ylabel("Features")
