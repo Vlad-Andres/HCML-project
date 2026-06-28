@@ -4,3 +4,4 @@ venv
 .vscode/launch.json
 .DS_Store
 err
+uv.lock

@@ -4,14 +4,19 @@ We analyzes the Open University Learning Analytics Dataset (OULAD) to evaluate f
 
 ## How to run
 
-Create and activate a Python environment
+We use [uv](https://github.com/astral-sh/uv) to manage project dependencies and virtual environments.
 
-  ```bash
-  python3 -m venv .venv
-  source .venv/bin/activate
-  ```
+### 1. Install `uv` (if not already installed)
+```bash
+brew install uv
+```
 
-Now you can run the notebook and it will install all the needed packages in the first cell
+### 2. Set up the environment and sync dependencies
+Run the following command in the project root:
+```bash
+uv sync
+```
+Now you can run the notebook.
 
 ## Dataset
 
